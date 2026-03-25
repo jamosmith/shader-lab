@@ -112,20 +112,20 @@ The easiest way to build the right command:
 The command looks something like:
 
 ```
-node render.js 4200 --shader=synthwave_nebula --width=1920 --height=1080 --fps=30 --format=jpeg --speed=1.0000
+node render.js 30 --shader=synthwave_nebula --width=1920 --height=1080 --fps=30 --format=jpeg --speed=1.0000
 ```
 
 ### Manual usage
 
 ```
-node render.js <seconds> [options]
+node render.js <seconds> --shader=ID [options]
 ```
 
-The first positional argument is the **duration in seconds**.
+The first positional argument is the **duration in seconds**. The `--shader` flag is **required**.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--shader=ID` | `synthwave_nebula` | Which shader to render |
+| `--shader=ID` | *(required)* | Which shader to render (any standalone `.html` file) |
 | `--width=N` | `1920` | Width in pixels |
 | `--height=N` | `1080` | Height in pixels |
 | `--fps=N` | `30` | Frames per second |
@@ -138,9 +138,9 @@ The first positional argument is the **duration in seconds**.
 ### Examples
 
 ```
-node render.js 30                             # 30-second test render
-node render.js 300 --shader=deep_space_nebula # 5 minutes of Deep Space Nebula
-node render.js 4200 --width=3840 --height=2160 # 70 minutes at 4K
+node render.js 30 --shader=synthwave_nebula    # 30-second test render
+node render.js 300 --shader=deep_space_nebula  # 5 minutes of Deep Space Nebula
+node render.js 4200 --shader=gas_giant_flyby --width=3840 --height=2160  # 70 min at 4K
 ```
 
 > **Heads up:** Rendering is slow. A 70-minute 1080p render at 30fps is 126,000 frames — each one is a headless browser screenshot. Budget real time accordingly, or start with a short test.

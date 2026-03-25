@@ -1,9 +1,10 @@
 /**
- * SYNTHWAVE NEBULA — Offline Renderer
+ * Shader Lab — Offline Renderer
+ * 
+ * Renders any shader from the gallery to an MP4 video via headless Chrome + ffmpeg.
  * 
  * SETUP (one time):
- *   npm init -y
- *   npm install puppeteer
+ *   npm install
  *   Make sure ffmpeg is installed (https://ffmpeg.org/download.html)
  * 
  * USAGE:
@@ -12,6 +13,7 @@
  * The first argument is the render duration in seconds.
  * 
  * OPTIONS:
+ *   --shader=ID     Which shader to render (required — see available list below)
  *   --width=N       Width in pixels (default: 1920)
  *   --height=N      Height in pixels (default: 1080)
  *   --fps=N         Frames per second (default: 30)
@@ -21,15 +23,24 @@
  *   --output=FILE   Output filename (default: auto-generated)
  * 
  * EXAMPLES:
- *   node render.js 30                           # 30s test, fast defaults
- *   node render.js 4200                         # 70 min, 1080p 30fps
- *   node render.js 300 --width=1280 --height=720  # 5 min, 720p
- *   node render.js 4200 --fps=24 --format=jpeg  # 70 min, 24fps, fast
- *   node render.js 60 --format=png --crf=15     # 1 min, max quality
+ *   node render.js 30 --shader=deep_space_nebula   # 30s test
+ *   node render.js 300 --shader=gas_giant_flyby     # 5 min render
+ *   node render.js 4200 --shader=synthwave_nebula --width=3840 --height=2160  # 70 min at 4K
+ *   node render.js 60 --shader=coral_reef --format=png --crf=15  # 1 min, max quality
  */
 
 const puppeteer = require('puppeteer');
 const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// Shader registry — maps IDs to standalone HTML files relative to render.js
+const SHADER_REGISTRY = {};
+const htmlFiles = fs.readdirSync(__dirname).filter(f => f.endsWith('.html') && f !== 'index.html');
+for (const file of htmlFiles) {
+  const id = file.replace('.html', '');
+  SHADER_REGISTRY[id] = file;
+}
 
 // === PARSE CLI ARGS ===
 function parseArgs() {
@@ -42,7 +53,7 @@ function parseArgs() {
     quality: 95,
     crf: 18,
     speed: 1.0,
-    shader: 'synthwave_nebula',
+    shader: null,
     output: null,
     seconds: null,
   };
@@ -69,10 +80,13 @@ function parseArgs() {
 
 const opts = parseArgs();
 
+const availableShaders = Object.keys(SHADER_REGISTRY).join(', ');
+
 if (!opts.seconds || opts.seconds <= 0) {
-  console.log('Usage: node render.js <seconds> [options]');
+  console.log('Usage: node render.js <seconds> --shader=ID [options]');
   console.log('');
   console.log('Options:');
+  console.log('  --shader=ID     Shader to render (required)');
   console.log('  --width=N       Width (default: 1920)');
   console.log('  --height=N      Height (default: 1080)');
   console.log('  --fps=N         FPS (default: 30)');
@@ -80,14 +94,20 @@ if (!opts.seconds || opts.seconds <= 0) {
   console.log('  --quality=N     JPEG quality 1-100 (default: 95)');
   console.log('  --crf=N         H.264 quality 0-51 (default: 18)');
   console.log('  --speed=N       Shader time multiplier (default: 1.0)');
-  console.log('  --shader=NAME   Shader id (default: synthwave_nebula)');
   console.log('  --output=FILE   Output filename (default: auto-timestamped)');
   console.log('');
+  console.log(`Available shaders: ${availableShaders}`);
+  console.log('');
   console.log('Examples:');
-  console.log('  node render.js 30                                     # 30s quick test');
-  console.log('  node render.js 4200 --shader=synthwave_nebula         # 70 min');
-  console.log('  node render.js 300 --width=1280 --height=720 --speed=2  # 720p, 2x speed');
-  console.log('  node render.js 4200 --shader=deep_space_nebula        # different shader');
+  console.log('  node render.js 30 --shader=deep_space_nebula            # 30s quick test');
+  console.log('  node render.js 4200 --shader=gas_giant_flyby            # 70 min render');
+  console.log('  node render.js 300 --shader=coral_reef --width=1280 --height=720  # 720p');
+  process.exit(1);
+}
+
+if (!opts.shader) {
+  console.error('Error: --shader=ID is required.');
+  console.error(`Available shaders: ${availableShaders}`);
   process.exit(1);
 }
 
@@ -149,15 +169,6 @@ function printProgress() {
   );
 }
 
-// Shader registry — maps IDs to file paths relative to render.js
-const SHADER_REGISTRY = {
-  'synthwave_nebula': 'shaders/synthwave_nebula.html',
-  'deep_space_nebula': 'shaders/deep_space_nebula.html',
-};
-
-const path = require('path');
-const fs = require('fs');
-
 function buildHTML() {
   const shaderFile = SHADER_REGISTRY[SHADER_ID];
   if (!shaderFile) {
@@ -170,7 +181,7 @@ function buildHTML() {
   const shaderPath = path.resolve(__dirname, shaderFile);
   if (!fs.existsSync(shaderPath)) {
     console.error(`  Shader file not found: ${shaderPath}`);
-    console.error(`  Make sure the shaders/ folder is next to render.js`);
+    console.error(`  Make sure the shader .html file is next to render.js`);
     process.exit(1);
   }
 

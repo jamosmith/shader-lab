@@ -160,6 +160,7 @@ body.hide-cursor, body.hide-cursor * { cursor: none !important; }
 // Example:
 //   { id: 'my_shader', name: 'My Shader', desc: 'A short description.' },
 const userShaders = [
+  { id: 'coral_reef', name: 'Coral Reef', desc: 'Sunlit underwater coral reef with caustics, god rays, and drifting plankton.' },
 ];
 
 // BUILT-IN SHADERS — shipped with the repo.
@@ -370,8 +371,8 @@ void main(){
     float d=0.;
     for(float i=0.;i<85.;i++){
         vec3 p=D*d;p.z+=T*1.6;p.y+=1.5;
-        float yWave=cos(p.x/28.)*2.5+sin(p.z/40.)*2.2+cos(p.x/11.+p.z/18.)*1.1;
-        float s=7.5-abs(p.y-yWave);s-=8.2*triNoise3d(p/38.,.028);
+        float yWave=cos(p.x/45.)*3.+sin(p.z/60.)*2.8+cos(p.x/18.+p.z/28.)*1.4;
+        float s=7.5-abs(p.y-yWave);s-=8.2*triNoise3d(p/60.,.028);
         d+=s=.1+.35*abs(s);
         float ph=Tslow+i*.1+p.z*.003;
         vec3 gold=vec3(1.,.78,.32),amber=vec3(.92,.52,.18);
@@ -428,6 +429,156 @@ void main(){
     float gray=dot(col,vec3(.299,.587,.114));col=mix(vec3(gray),col,1.3);
     vec2 vuv=gl_FragCoord.xy/u_res;col*=1.-.4*dot((vuv-.5)*1.3,(vuv-.5)*1.3);
     col*=.97+.03*sin(gl_FragCoord.y*2.);col=pow(max(col,0.),vec3(.9));fragColor=vec4(col,1.);}`;
+
+S['coral_reef'] = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform vec2 u_res;
+uniform float u_time;
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float h31(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+float ns2(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+    return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);}
+float ns3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+    return mix(mix(mix(h31(i),h31(i+vec3(1,0,0)),f.x),mix(h31(i+vec3(0,1,0)),h31(i+vec3(1,1,0)),f.x),f.y),
+               mix(mix(h31(i+vec3(0,0,1)),h31(i+vec3(1,0,1)),f.x),mix(h31(i+vec3(0,1,1)),h31(i+vec3(1,1,1)),f.x),f.y),f.z);}
+float fb2(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*ns2(p);p=p*2.03+vec2(.31,.17);a*=.5;}return v;}
+float fb3(vec3 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*ns3(p);p=p*2.03+.31;a*=.49;}return v;}
+float caustic(vec2 p,float t){
+    float c=0.;mat2 m=mat2(.866,-.5,.5,.866);
+    for(int i=0;i<3;i++){float fi=float(i);vec2 q=p+t*vec2(.15+fi*.05,-.1+fi*.08);
+        c+=sin(q.x*3.1+sin(q.y*2.7+t*(.7+fi*.3)))*cos(q.y*2.9+cos(q.x*3.3-t*(.5+fi*.2)));p=m*p*1.7;}
+    return clamp(.5+.17*c,0.,1.);}
+float reef(vec2 p){
+    float t=u_time;
+    float sandRip=sin(p.x*8.+p.y*2.5+sin(p.y*.5)*3.)*.045
+                 +sin(p.x*14.-p.y*5.+sin(p.x*.3)*2.)*.018
+                 +sin(p.x*22.+p.y*8.)*.006;
+    p+=vec2(ns2(p*.25+200.),ns2(p*.25+400.))*1.5;
+    float mound=fb2(p*.18);mound=smoothstep(.25,.52,mound)*.8;
+    float sandM=1.-smoothstep(0.,.15,mound);
+    float h=ns2(p*.15+vec2(t*.002))*.08+sandRip*sandM;
+    h+=mound;
+    float med=fb2(p*.5+50.);med=pow(max(med-.18,0.),.55)*.7;
+    h+=med*smoothstep(0.,.3,mound);
+    float fine=ns2(p*2.2+vec2(t*.006,0));fine=max(fine-.32,0.)*.4;
+    h+=fine*smoothstep(.08,.45,mound);
+    float det=max(ns2(p*3.8+100.)-.42,0.)*.25;
+    h+=det*smoothstep(.15,.55,mound);
+    float cm=smoothstep(0.,.15,mound);
+    h+=(ns2(p*6.)*.09+ns2(p*11.)*.04+ns2(p*18.+vec2(t*.01,0))*.02)*cm;
+    h+=sin(t*.35+p.x*.7)*sin(t*.28+p.y*.9)*.01*smoothstep(.3,1.,mound);
+    return h;}
+vec3 reefN(vec2 p){vec2 e=vec2(.01,0);
+    return normalize(vec3(reef(p-e.xy)-reef(p+e.xy),2.*e.x,reef(p-e.yx)-reef(p+e.yx)));}
+float march(vec3 ro,vec3 rd,float maxD,out vec3 hp){
+    float t=.1,prev=0.;
+    for(int i=0;i<90;i++){vec3 p=ro+rd*t;float gy=-2.+reef(p.xz),dy=p.y-gy;
+        if(dy<.001){float a=prev,b=t;
+            for(int j=0;j<6;j++){float m=(a+b)*.5;vec3 pm=ro+rd*m;
+                if(pm.y<-2.+reef(pm.xz))b=m;else a=m;}
+            hp=ro+rd*(a+b)*.5;return(a+b)*.5;}
+        prev=t;t+=max(dy*.45,.04);if(t>maxD)break;}
+    return -1.;}
+void main(){
+    vec2 uv=(2.*gl_FragCoord.xy-u_res)/min(u_res.x,u_res.y);float t=u_time,ct=t*.04;
+    vec3 ro=vec3(sin(ct*.7)*4.,1.5+sin(t*.05)*.2,ct*3.);
+    vec3 ta=ro+vec3(sin(t*.035)*.5,-1.2,3.);
+    ro.y+=sin(t*.22)*.05;ro.x+=cos(t*.17)*.04;
+    vec3 fw=normalize(ta-ro),ri=normalize(cross(vec3(0,1,0),fw)),up=cross(fw,ri);
+    vec3 rd=normalize(fw+uv.x*ri+uv.y*up);
+    vec3 hp;float d=march(ro,rd,18.,hp);
+    float surfY=3.;float dSurf=rd.y>.005?(surfY-ro.y)/rd.y:-1.;
+    if(dSurf<0.||dSurf>18.)dSurf=-1.;
+    vec3 col=vec3(0);float hitD=18.;
+    if(d>0.&&(dSurf<0.||d<dSurf)){
+        hitD=d;
+        vec3 n=reefN(hp.xz);vec3 sun=normalize(vec3(.2,1.,.15));
+        float diff=max(dot(n,sun),0.),amb=.12,wrap=max(dot(n,sun)*.5+.5,0.)*.15;
+        float caust=caustic(hp.xz*1.5,t*.4);diff+=(caust-.4)*.7*max(n.y,0.);
+        float h=reef(hp.xz),coralF=smoothstep(.1,.65,h);
+        float cn1=fb3(vec3(hp.xz*2.,t*.005)),cn2=fb3(vec3(hp.xz*1.5,0)+50.);
+        float ripVis=sin(hp.x*8.+hp.z*2.5+sin(hp.z*.5)*3.)*.5+.5;
+        vec3 sand=mix(vec3(.5,.44,.3),vec3(.68,.6,.45),ripVis*.25*(1.-coralF));
+        vec3 cOr=vec3(.95,.5,.05),cRd=vec3(.9,.15,.08),cPk=vec3(.9,.2,.55);
+        vec3 cPu=vec3(.55,.08,.65),cTl=vec3(.05,.7,.5),cYl=vec3(.95,.82,.12);
+        vec3 cLm=vec3(.4,.8,.18),cBl=vec3(.1,.4,.85);
+        vec3 mt=sand;
+        mt=mix(mt,cOr,coralF*smoothstep(.28,.52,cn1));
+        mt=mix(mt,cRd,coralF*smoothstep(.38,.62,cn2));
+        mt=mix(mt,cPk,coralF*smoothstep(.42,.68,fb3(vec3(hp.xz*3.,0)+100.)));
+        mt=mix(mt,cPu,coralF*smoothstep(.52,.78,fb3(vec3(hp.xz*2.,0)+200.))*.55);
+        mt=mix(mt,cTl,coralF*smoothstep(.48,.72,fb3(vec3(hp.xz*1.8,0)+300.))*.4);
+        mt=mix(mt,cYl,coralF*smoothstep(.38,.62,fb3(vec3(hp.xz*2.5,0)+400.))*.5);
+        mt=mix(mt,cLm,coralF*smoothstep(.48,.72,fb3(vec3(hp.xz*1.2,0)+500.))*.3);
+        mt=mix(mt,cBl,coralF*smoothstep(.58,.82,fb3(vec3(hp.xz*4.,0)+600.))*.3);
+        col=mt*(amb+diff+wrap)*1.15;
+        vec3 ref=reflect(-sun,n);col+=pow(max(dot(ref,-rd),0.),16.)*.18*vec3(.3,.5,.45);
+        float rim=pow(1.-max(dot(n,-rd),0.),3.);col+=rim*vec3(.04,.12,.15);
+    }else if(dSurf>0.){
+        hitD=dSurf;vec3 sfp=ro+rd*dSurf;
+        float wv=ns2(sfp.xz*.5+vec2(t*.35,t*.25))*.35+ns2(sfp.xz*1.3+vec2(-t*.2,t*.3))*.2;
+        float sc=caustic(sfp.xz*.4,t*.35);
+        float bright=smoothstep(0.,.45,rd.y);
+        vec3 surf=vec3(.06,.18,.28)+bright*vec3(.25,.38,.32);
+        surf+=sc*vec3(.3,.4,.3)*.7+wv*vec3(.08,.12,.08);
+        vec3 sunDir=normalize(vec3(.2,1.,.15));float sunDot=max(dot(rd,sunDir),0.);
+        surf+=vec3(1.,.95,.85)*pow(sunDot,64.)*.7+vec3(.9,.8,.55)*pow(sunDot,8.)*.2;
+        col=surf;
+    }else{col=mix(vec3(.01,.04,.1),vec3(.03,.1,.18),smoothstep(-.5,.0,rd.y));}
+    float ab=exp(-hitD*.07),scatter=1.-exp(-hitD*.04);
+    col=col*ab+vec3(.03,.1,.18)*scatter;
+    float volL=0.;
+    for(int i=0;i<8;i++){float td=min(hitD,14.)*(float(i)+.5)/8.;
+        vec3 vp=ro+rd*td;
+        float shaft=sin(vp.x*1.6+sin(vp.z*1.2+t*.18)*.7+t*.08)
+                   *sin(vp.z*1.4+cos(vp.x*.9-t*.12)*.6);
+        float shaft2=sin(vp.x*2.8+sin(vp.z*2.+t*.25)*.4+t*.14)
+                    *sin(vp.z*2.5+cos(vp.x*1.8-t*.2)*.35);
+        shaft=max(shaft,0.)+max(shaft2,0.)*.5;
+        shaft*=smoothstep(-2.,3.,vp.y);
+        volL+=shaft*exp(-td*.06);}
+    col+=volL*.09*vec3(.16,.3,.24);
+    float rays=0.;
+    for(int i=0;i<8;i++){float fi=float(i),freq=.8+fi*.45,ph=t*(.04+fi*.011)+fi*1.9;
+        rays+=smoothstep(.5,0.,abs(sin(uv.x*freq+sin(uv.x*.5+ph)*.45+ph)))*(.15-fi*.012);}
+    rays*=smoothstep(-.4,.6,uv.y)*smoothstep(1.2,.1,uv.y);
+    col+=rays*vec3(.14,.26,.2)*(1.+caustic(uv*1.5,t*.25)*.35);
+    for(int i=0;i<32;i++){
+        float fi=float(i),spd=.06+h21(vec2(fi,0))*.12;
+        float fsz=.015+h21(vec2(fi,5))*.04;
+        float yh=h21(vec2(fi,1))*2.6-1.3;
+        vec3 fp=vec3(sin(t*spd+fi*1.3)*7.+cos(t*spd*.35+fi*.8)*3.5,
+                     yh+sin(t*.13+fi*1.1)*.35,
+                     ro.z+sin(t*spd*.5+fi*1.9)*6.+mod(fi*.9,8.));
+        vec3 dp=fp-ro;float z=dot(dp,fw);if(z<.3||z>15.)continue;
+        vec2 sp=vec2(dot(dp,ri),dot(dp,up))/z;float sz=fsz/z;
+        float f=length((uv-sp)/vec2(sz,sz*.26));
+        float fa=smoothstep(1.1,.5,f)*exp(-z*.045);
+        vec3 fc=mix(vec3(.02,.04,.08),vec3(.06,.1,.16),h21(vec2(fi,3)));
+        col=mix(col,fc,fa*.55);}
+    for(int i=0;i<24;i++){
+        float fi=float(i),rspd=.14+h21(vec2(fi,10))*.22;
+        float wb=sin(t*1.5+fi*3.7)*.16+cos(t*1.1+fi*2.3)*.09;
+        vec3 bp=vec3(sin(fi*4.3+fi*.7)*4.5+wb,
+                     mod(-2.+fi*.23+t*rspd,5.5)-2.,
+                     mod(fi*1.9+ro.z*.8,12.)-2.);
+        vec3 dp=bp-ro;float z=dot(dp,fw);if(z<.2||z>12.)continue;
+        vec2 sp=vec2(dot(dp,ri),dot(dp,up))/z;
+        float r=(.003+h21(vec2(fi,20))*.006)/z;float bd=length(uv-sp);
+        float ring=smoothstep(r,r*.55,bd)-smoothstep(r*.4,r*.08,bd);
+        float hl=smoothstep(r*.3,0.,length(uv-sp+vec2(r*.3,-r*.2)));
+        col+=(ring*.4+hl*.25)*vec3(.5,.75,.65)*exp(-z*.06);}
+    for(int i=0;i<14;i++){float fi=float(i);
+        vec3 pp=vec3(sin(fi*7.3+t*.06)*5.,sin(fi*3.7+t*.09+fi)*1.5-.5,
+                     mod(fi*3.1+ro.z+t*.08,14.)-3.);
+        vec3 dp=pp-ro;float z=dot(dp,fw);if(z<.3||z>12.)continue;
+        vec2 sp=vec2(dot(dp,ri),dot(dp,up))/z;
+        col+=smoothstep(.004/z,0.,length(uv-sp))*.3/(z*.4+.5)*vec3(.25,.45,.35);}
+    col=col/(1.+col);col=pow(max(col,0.),vec3(.87));
+    col=mix(col,col*vec3(.88,.97,1.08),.35);
+    vec2 vuv=gl_FragCoord.xy/u_res;col*=1.-.42*dot((vuv-.5)*1.3,(vuv-.5)*1.3);
+    fragColor=vec4(col,1);}`;
 
 // ---- STATE ----
 let active = null, gl = null, animId = null, startTime = 0, currentSpeed = 1.0, hideTimer = null;

@@ -80,10 +80,10 @@ void main(){
         p.z+=T*1.6;
         p.y+=1.5;
 
-        float yWave=cos(p.x/28.)*2.5+sin(p.z/40.)*2.2
-                    +cos(p.x/11.+p.z/18.)*1.1;
+        float yWave=cos(p.x/45.)*3.+sin(p.z/60.)*2.8
+                    +cos(p.x/18.+p.z/28.)*1.4;
         float s=7.5-abs(p.y-yWave);
-        s-=8.2*triNoise3d(p/38.,.028);
+        s-=8.2*triNoise3d(p/60.,.028);
         d+=s=.1+.35*abs(s);
 
         float ph=Tslow+i*.1+p.z*.003;
