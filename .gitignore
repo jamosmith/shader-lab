@@ -1,0 +1,12 @@
+node_modules/
+*.mp4
+*.webm
+*.avi
+*.mov
+renders/
+.DS_Store
+.idea/
+.claude/
+.vscode/
+.env
+package-lock.json

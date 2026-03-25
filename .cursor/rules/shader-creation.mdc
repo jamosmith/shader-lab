@@ -1,0 +1,36 @@
+---
+description: Rules for creating new WebGL2 fragment shaders for the Shader Lab gallery
+globs: index.html
+alwaysApply: false
+---
+
+# Shader Creation Rules
+
+1. Edit `index.html`. Add the shader source as a new entry in the `S` object
+   (template-string GLSL), and add a registry entry to the `userShaders` array
+   at the top of the registry section. Give it a unique snake_case id, a
+   human-readable name, and a short description.
+
+2. The shader MUST be a WebGL2 GLSL ES 3.00 fragment shader with this exact
+   interface:
+     #version 300 es
+     precision highp float;
+     out vec4 fragColor;
+     uniform vec2 u_res;   // canvas resolution in pixels
+     uniform float u_time; // elapsed time in seconds
+
+3. Use ONLY u_res and u_time as inputs. No textures, no additional uniforms,
+   no mouse input.
+
+4. The shader must produce interesting, smoothly animated visuals. Aim for
+   something that looks good as a screensaver or ambient display.
+
+5. Write all math/noise functions inline — don't rely on external libraries.
+   Common building blocks: simplex/value noise, fbm, domain warping,
+   raymarching, SDFs.
+
+6. Keep the shader self-contained in one fragment shader string. It should
+   compile and run without errors.
+
+7. Do NOT copy an existing shader from the gallery. Create something original
+   that matches the user's idea.

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gas Giant Flyby</title>
+<style>
+*{margin:0;padding:0}
+body{background:#000;overflow:hidden;cursor:none}
+canvas{display:block;width:100vw;height:100vh}
+#back{position:fixed;top:20px;left:20px;z-index:10;color:#ff9040;font:14px monospace;
+  text-decoration:none;opacity:0.4;cursor:pointer;transition:opacity 0.3s}
+#back:hover{opacity:1}
+</style>
+</head>
+<body>
+<a id="back" href="index.html">← BACK</a>
+<canvas id="c"></canvas>
+<script>
+const params = new URLSearchParams(location.search);
+const SPEED = parseFloat(params.get('speed')) || 1.0;
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+if(!gl){document.body.innerHTML='<div style="color:#fff;padding:40px">WebGL2 required</div>';throw 0}
+
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,1.5);
+  canvas.width=Math.floor(innerWidth*dpr);
+  canvas.height=Math.floor(innerHeight*dpr);
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+addEventListener('resize',resize);resize();
+
+const fs=`#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform vec2 u_res;
+uniform float u_time;
+#define T u_time
+#define Tslow (u_time*0.15)
+
+float tri(in float x){return abs(fract(x)-.5);}
+vec3 tri3(in vec3 p){return vec3(tri(p.z+tri(p.y)),tri(p.z+tri(p.x)),tri(p.y+tri(p.x)));}
+
+float triNoise3d(vec3 p,float spd){
+    p.z+=T*spd;float z=1.5,rz=0.;vec3 bp=p;
+    float ca=cos(.4),sa=sin(.4);mat2 m2=mat2(ca,sa,-sa,ca);
+    for(float i=0.;i<=3.;i++){
+        vec3 dg=tri3(bp*2.);p+=dg+T*spd*.1;
+        bp*=2.;z*=1.75;p*=1.1;p.yz*=m2;
+        rz+=tri(p.z+tri(p.x+tri(p.y)))/z;bp+=.2;}
+    return rz;}
+
+void main(){
+    vec2 u=gl_FragCoord.xy;vec3 res=vec3(u_res,1.);
+    vec2 uv=(2.*u-res.xy)/res.y;
+    vec4 o=vec4(0);
+    float horizonC=-.05;
+    float horizon=horizonC-.015*uv.x*uv.x;
+
+    // === SUN ORBIT ===
+    float cyc=T*.038;
+    vec2 sunPos=vec2(.55*cos(cyc*.71),.12+.50*sin(cyc));
+    float sunAlt=sunPos.y-horizonC;
+    float sunVis=smoothstep(-.12,.18,sunAlt);
+    float sunsetF=smoothstep(.35,.0,sunAlt)*sunVis;
+
+    // === CLOUDS — full-screen volumetric ray march ===
+    vec3 D=normalize(vec3((u+u-res.xy)/res.y,1.2));
+    float sw=.015*sin(T*.3)+.008*cos(T*.47);
+    float cw=cos(sw),s2=sin(sw);
+    D.xz*=mat2(cw,s2,-s2,cw);
+    float pt=.006*sin(T*.25);
+    float cp2=cos(pt),sp2=sin(pt);
+    D.yz*=mat2(cp2,sp2,-sp2,cp2);
+
+    float d=0.;
+    for(float i=0.;i<85.;i++){
+        vec3 p=D*d;
+        p.z+=T*1.6;
+        p.y+=1.5;
+
+        float yWave=cos(p.x/28.)*2.5+sin(p.z/40.)*2.2
+                    +cos(p.x/11.+p.z/18.)*1.1;
+        float s=7.5-abs(p.y-yWave);
+        s-=8.2*triNoise3d(p/38.,.028);
+        d+=s=.1+.35*abs(s);
+
+        float ph=Tslow+i*.1+p.z*.003;
+        vec3 gold=vec3(1.,.78,.32);
+        vec3 amber=vec3(.92,.52,.18);
+        vec3 teal=vec3(.3,.72,.68);
+        vec3 cream=vec3(1.,.96,.88);
+        vec3 lavender=vec3(.7,.5,.85);
+
+        vec3 cc=mix(gold,amber,.5+.5*cos(ph));
+        cc=mix(cc,teal,.2+.2*sin(ph*.55+1.8));
+        cc=mix(cc,cream,.25+.25*cos(ph*1.2+2.5));
+        cc=mix(cc,lavender,.1+.1*sin(ph*.8+4.));
+
+        vec3 sunsetTint=mix(vec3(1.),vec3(1.3,.7,.4),sunsetF*.5);
+        cc*=sunsetTint;
+
+        float lightBias=.55+.45*(D.x*sign(sunPos.x+.001));
+        o+=vec4(5.5*cc*lightBias/s,0.);
+
+        o+=vec4(.3*sunVis*vec3(.85,.55,.25)/abs(1.5+uv.y-horizon),0.);}
+
+    o+=vec4(1.8*sunVis*vec3(1.,.92,.6)/length((uv-sunPos)*2.2),0.);
+
+    o=tanh(o/4500.*exp(85.*vec4(4.,2.8,1.8,0.)/d/d));
+
+    vec2 sUV=uv-sunPos;float sd=length(sUV);
+    float sunCore=smoothstep(.07,.04,sd);
+    float sunGlow=exp(-sd*4.)*.35+.012/(sd+.008);
+    vec3 sc=mix(vec3(1.,.93,.72),vec3(1.,.5,.2),sunsetF);
+    sc=mix(sc,vec3(1.,.6,.3),clamp(sUV.y*3.+.5,0.,1.));
+    float cd=clamp(length(o.rgb)*2.,0.,1.);
+    o.rgb+=sc*(sunCore+sunGlow)*(1.-cd*.6)*sunVis;
+
+    // === GAS GIANT SURFACE ===
+    if(uv.y<horizon+.08){
+        vec2 gUV;
+        float depth=abs(uv.y-horizon);
+        gUV.y=3.5/(depth+.05);
+        gUV.x=uv.x*gUV.y*.055;
+        gUV.y+=T*.55;
+        gUV.x+=T*.003;
+
+        float warp=triNoise3d(vec3(gUV*.12,T*.002),.001)*5.;
+        float lat=gUV.y+warp;
+
+        float bfrac=fract(lat*.18+triNoise3d(vec3(gUV*.15,.0),.001)*1.2);
+        float b1=smoothstep(.15,.45,bfrac);
+        float b2=smoothstep(.6,.85,bfrac);
+        float band=b1-b2*.5;
+
+        float turb=triNoise3d(vec3(gUV*.4,T*.003),.002);
+        float storm=smoothstep(.5,.7,triNoise3d(vec3(gUV*.15,.2),.001));
+        float vortex=triNoise3d(vec3(gUV*.25+vec2(turb,warp)*.3,T*.002),.001);
+        float deep=triNoise3d(vec3(gUV*.08,T*.001),.0005);
+
+        vec3 c1=vec3(.82,.52,.22),c2=vec3(.95,.88,.65),c3=vec3(.52,.22,.08);
+        vec3 c4=vec3(.3,.55,.62),c5=vec3(.88,.42,.15);
+        vec3 c6=vec3(.7,.15,.1),c7=vec3(.95,.92,.85),c8=vec3(.45,.2,.5);
+
+        vec3 gCol=mix(c1,c2,band);
+        gCol=mix(gCol,c3,turb*.35);
+        gCol=mix(gCol,c5,storm*.55);
+        gCol=mix(gCol,c4,smoothstep(.4,.6,vortex)*.35);
+        gCol=mix(gCol,c6,smoothstep(.55,.7,deep)*.4);
+        gCol=mix(gCol,c7,smoothstep(.3,.15,turb)*band*.3);
+        gCol=mix(gCol,c8,smoothstep(.6,.75,storm*vortex)*.3);
+
+        float di=1./(depth+.05);
+        gCol*=smoothstep(75.,7.,di);
+        gCol=mix(gCol,vec3(.72,.52,.32),smoothstep(.3,0.,depth)*.55);
+        gCol+=vec3(.3,.15,.04)*pow(smoothstep(-.8,horizon,uv.y),2.);
+
+        float blend=smoothstep(horizon-.05,horizon+.08,uv.y);
+        o.rgb=mix(gCol,o.rgb,blend);
+    }
+
+    // === ATMOSPHERIC RIM ===
+    float rd=abs(uv.y-horizon);
+    float rimBoost=1.+sunsetF*.8;
+    o.rgb+=vec3(.88,.58,.28)*exp(-rd*16.)*.5*rimBoost*(.3+.7*sunVis);
+    o.rgb+=vec3(.35,.55,.75)*exp(-rd*32.)*.2*(.4+.6*sunVis);
+    o.rgb+=mix(vec3(1.,.85,.6),vec3(1.,.45,.15),sunsetF)*exp(-rd*60.)*.12*rimBoost*sunVis;
+
+    // === POST-PROCESSING ===
+    vec3 col=o.rgb;
+    float sceneBright=.3+.7*sunVis;
+    col*=sceneBright;
+    col=mix(col,col*vec3(.6,.65,.85),(.7-sunVis)*.5);
+    float gray=dot(col,vec3(.299,.587,.114));
+    col=mix(vec3(gray),col,1.3);
+    vec2 vuv=gl_FragCoord.xy/u_res;
+    col*=1.-.4*dot((vuv-.5)*1.3,(vuv-.5)*1.3);
+    col*=.97+.03*sin(gl_FragCoord.y*2.);
+    col=pow(max(col,0.),vec3(.9));
+    fragColor=vec4(col,1.);}
+`;
+
+const vs=`#version 300 es
+in vec2 a_pos;void main(){gl_Position=vec4(a_pos,0,1);}`;
+
+function compile(t,s){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){const e=gl.getShaderInfoLog(sh);console.error(e);
+document.body.innerHTML='<pre style="color:#f88;padding:40px;font-size:13px;white-space:pre-wrap">'+e+'</pre>';throw e}return sh}
+const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,vs));
+gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);
+if(!gl.getProgramParameter(p,gl.LINK_STATUS)){const e=gl.getProgramInfoLog(p);
+document.body.innerHTML='<pre style="color:#f88;padding:40px">Link: '+e+'</pre>';throw e}
+gl.useProgram(p);
+const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+const l=gl.getAttribLocation(p,'a_pos');gl.enableVertexAttribArray(l);
+gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);
+const uR=gl.getUniformLocation(p,'u_res'),uT=gl.getUniformLocation(p,'u_time');
+const t0=performance.now();
+!function frame(){gl.uniform2f(uR,canvas.width,canvas.height);
+gl.uniform1f(uT,(performance.now()-t0)*0.001*SPEED);
+gl.drawArrays(gl.TRIANGLE_STRIP,0,4);requestAnimationFrame(frame)}();
+</script>
+</body>
+</html>

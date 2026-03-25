@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Deep Space Nebula</title>
+<style>
+*{margin:0;padding:0}
+body{background:#000;overflow:hidden;cursor:none}
+canvas{display:block;width:100vw;height:100vh}
+#back{position:fixed;top:20px;left:20px;z-index:10;color:#4af;font:14px monospace;
+  text-decoration:none;opacity:0.4;cursor:pointer;transition:opacity 0.3s}
+#back:hover{opacity:1}
+</style>
+</head>
+<body>
+<a id="back" href="index.html">← BACK</a>
+<canvas id="c"></canvas>
+<script>
+const params = new URLSearchParams(location.search);
+const SPEED = parseFloat(params.get('speed')) || 1.0;
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+if(!gl){document.body.innerHTML='<div style="color:#fff;padding:40px">WebGL2 required</div>';throw 0}
+
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,1.25);
+  canvas.width=Math.floor(innerWidth*dpr);
+  canvas.height=Math.floor(innerHeight*dpr);
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+addEventListener('resize',resize);resize();
+
+const fs=`#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform vec2 u_res;
+uniform float u_time;
+
+vec3 hash33(vec3 p){
+    p=vec3(dot(p,vec3(127.1,311.7,74.7)),dot(p,vec3(269.5,183.3,246.1)),dot(p,vec3(113.5,271.9,124.6)));
+    return -1.0+2.0*fract(sin(p)*43758.5453123);}
+float simplex3d(vec3 p){
+    const float K1=0.333333333,K2=0.166666667;
+    vec3 i=floor(p+(p.x+p.y+p.z)*K1);vec3 d0=p-(i-(i.x+i.y+i.z)*K2);
+    vec3 e=step(vec3(0.0),d0-d0.yzx);vec3 i1=e*(1.0-e.zxy);vec3 i2=1.0-e.zxy*(1.0-e);
+    vec3 d1=d0-(i1-K2),d2=d0-(i2-2.0*K2),d3=d0-(1.0-3.0*K2);
+    vec4 h=max(0.6-vec4(dot(d0,d0),dot(d1,d1),dot(d2,d2),dot(d3,d3)),0.0);
+    vec4 n=h*h*h*h*vec4(dot(d0,hash33(i)),dot(d1,hash33(i+i1)),dot(d2,hash33(i+i2)),dot(d3,hash33(i+1.0)));
+    return dot(n,vec4(52.0));}
+float fbm2(vec3 p){return 0.5*simplex3d(p)+0.25*simplex3d(p*2.0);}
+float warpedFbm(vec3 p){
+    vec3 q=vec3(fbm2(p),fbm2(p+vec3(5.2,1.3,2.8)),fbm2(p+vec3(1.7,9.2,4.1)));
+    return fbm2(p+3.5*q);}
+float flameBursts(vec3 p,float ti){
+    float s=0.0;
+    for(int k=0;k<4;k++){
+        float fk=float(k);
+        float seg=floor(ti*0.11+fk*0.29);
+        vec3 h=hash33(vec3(seg,fk*7.1,4.2));
+        vec3 cen=vec3(mix(-7.0,7.0,h.x),mix(-5.0,5.0,h.y),seg*1.15+mix(-3.0,3.0,h.z));
+        cen+=vec3(ti*0.08,ti*0.05,ti*0.06)*vec3(h.x-0.5,h.y-0.5,0.3);
+        float cyc=fract(ti*0.17+fk*0.19+h.z);
+        float life=smoothstep(0.0,0.07,cyc)*(1.0-smoothstep(0.32,0.52,cyc));
+        float r=length(p-cen);
+        float core=exp(-r*r*(0.09+0.06*h.x));
+        float corona=exp(-r*r*0.035)*0.35;
+        s+=(core+corona)*life;
+    }
+    return s;}
+vec4 nebula(vec3 ro,vec3 rd){
+    vec4 col=vec4(0);float t=0.0,dt=0.28;float ti=u_time;
+    for(int i=0;i<36;i++){
+        vec3 p=ro+rd*t;float ts=ti*0.012;
+        p+=vec3(ts*0.7,ts*0.3,ts*0.5);
+        float density=warpedFbm(p*0.11);
+        float rib=abs(fbm2(p*0.19+vec3(ts*0.08)))*0.55+0.45;
+        density=mix(density,density*rib+0.12*rib,0.42);
+        density=smoothstep(-0.36,0.5,density);
+        if(density>0.01){
+            float cn=fbm2(p*0.07+vec3(ti*0.005))*0.5+0.5;
+            vec3 purple=vec3(0.25,0.05,0.45),blue=vec3(0.03,0.1,0.4),
+                 teal=vec3(0.02,0.3,0.35),gold=vec3(0.6,0.35,0.05),crimson=vec3(0.5,0.02,0.1);
+            vec3 bc=cn<0.25?mix(purple,blue,cn*4.0):cn<0.5?mix(blue,teal,(cn-0.25)*4.0):
+                   cn<0.75?mix(teal,gold,(cn-0.5)*4.0):mix(gold,crimson,(cn-0.75)*4.0);
+            float em=smoothstep(0.35,0.85,density)*1.5;vec3 ec=bc*(1.0+em*2.0);
+            float alpha=density*0.102;col.rgb+=ec*alpha*(1.0-col.a);col.a+=alpha*(1.0-col.a);
+            float fl=flameBursts(p,ti);
+            if(fl>0.004){
+                float ft=fbm2(p*0.55+vec3(ti*0.25))*0.5+0.5;
+                vec3 fc=mix(vec3(1.0,0.12,0.02),mix(vec3(1.0,0.45,0.06),vec3(1.0,0.85,0.35),ft),smoothstep(0.2,0.9,fl));
+                float fa=fl*0.22;
+                col.rgb+=fc*fa*(1.0-col.a);col.a+=fa*0.45*(1.0-col.a);}
+            if(col.a>0.95)break;}
+        t+=dt;dt*=1.025;}
+    return col;}
+float stars(vec2 uv,float t){
+    vec2 id=floor(uv*140.0),f=fract(uv*140.0)-0.5;
+    float h=fract(sin(dot(id,vec2(127.1,311.7)))*43758.5453);
+    float b=smoothstep(0.8,1.0,h),tw=sin(t*(2.0+h*4.0)+h*6.28)*0.5+0.5;
+    return smoothstep(0.035+h*0.045,0.0,length(f))*b*(0.6+0.4*tw);}
+float shootingStars(vec2 uv,float ti){
+    float m=0.0;
+    for(int i=0;i<7;i++){
+        float fi=float(i);
+        float h0=fract(sin(fi*19.27+91.3)*43758.54);
+        float h1=fract(sin(fi*47.11+12.9)*23421.12);
+        vec2 dir=normalize(vec2(0.42+0.35*h0,-0.55-0.2*h1));
+        float cyc=fract(ti*(0.11+h0*0.06)+fi*0.37);
+        float vis=smoothstep(0.0,0.025,cyc)*smoothstep(0.42,0.28,cyc);
+        vec2 base=vec2(mix(-1.55,1.55,fract(fi*0.413+ti*0.007)),mix(-0.75,0.85,fract(fi*0.791+h0)));
+        vec2 pos=base+dir*cyc*4.2;
+        vec2 d=uv-pos;
+        float along=max(dot(d,dir),0.0);
+        float across=abs(dot(d,vec2(-dir.y,dir.x)));
+        float tail=smoothstep(0.62,0.0,along);
+        float streak=exp(-across*across*(650.0+h1*400.0))*tail*tail*vis;
+        m+=streak*(0.75+0.25*sin(ti*3.0+fi));}
+    return m;}
+float raySphereT(vec3 ro,vec3 rd,vec3 c,float R){
+    vec3 oc=ro-c;
+    float b=dot(oc,rd);
+    float D=b*b-dot(oc,oc)+R*R;
+    if(D<0.0)return -1.0;
+    float s=sqrt(D),t1=-b-s,t2=-b+s;
+    if(t1>0.001)return t1;
+    if(t2>0.001)return t2;
+    return -1.0;}
+vec3 shadeFireSurface(vec3 hp,vec3 rd,vec3 cen,float ti,float heat){
+    vec3 n=normalize(hp-cen);
+    float mu=max(dot(-rd,n),0.0);
+    vec3 gp=hp*(2.35+heat*0.4)+vec3(ti*0.32,ti*0.21,ti*0.08);
+    float f=fbm2(gp);
+    float g=fbm2(gp*2.5+vec3(9.0,ti*0.55,ti*0.2));
+    float sw=f*0.52+g*0.48;
+    float rim=pow(1.0-mu,2.5);
+    vec3 plasma=mix(vec3(1.0,0.92,0.55),vec3(1.0,0.38,0.03),smoothstep(0.12,0.9,sw));
+    vec3 edge=mix(vec3(1.0,0.2,0.0),vec3(0.55,0.02,0.0),rim);
+    vec3 co=mix(plasma,edge,rim*0.9);
+    float pu=0.78+0.22*sin(ti*(1.65+heat*0.5)+sw*6.28318);
+    return co*(1.25+sw*2.1)*pu*heat;}
+vec3 solarCorona(vec3 ro,vec3 rd,vec3 sunCen,float ti){
+    vec3 ts=normalize(sunCen-ro);
+    float mu=max(dot(rd,ts),0.0);
+    float warp=fbm2(vec3(rd.yx*5.5,ti*0.055))*0.065;
+    mu=clamp(mu+warp,0.0,1.0);
+    vec3 C=vec3(0.0);
+    C+=vec3(1.0,0.99,1.0)*pow(mu,340.0)*16.0;
+    C+=vec3(1.0,0.52,0.12)*pow(mu,105.0)*6.0;
+    C+=vec3(1.0,0.3,0.04)*pow(mu,34.0)*2.8;
+    C+=vec3(1.0,0.42,0.09)*pow(mu,10.0)*0.55;
+    C+=vec3(1.0,0.18,0.02)*pow(mu,4.0)*0.12;
+    float fil=fbm2(ts*3.8+vec3(0.0,0.0,ti*0.11));
+    C*=0.76+0.5*fil;
+    return C;}
+vec3 infernoBodies(vec3 ro,vec3 rd,float ti,vec3 fw,vec3 ri,vec3 up){
+    vec3 sunCen=ro+fw*56.0+ri*(8.5+3.8*sin(ti*0.13))+up*(3.2*cos(ti*0.1)+1.8*sin(ti*0.088));
+    float sunR=5.5;
+    float ang=ti*0.82,ay=ti*0.58;
+    vec3 ax=normalize(ri*cos(ang)+up*sin(ang)*0.7+fw*sin(ay)*0.32);
+    vec3 ballCen=sunCen+ax*12.0+up*sin(ti*1.15)*1.1+ri*cos(ti*0.95)*0.65;
+    float ballR=1.42;
+    float tS=raySphereT(ro,rd,sunCen,sunR);
+    float tB=raySphereT(ro,rd,ballCen,ballR);
+    vec3 disc=vec3(0.0);
+    if(tB>0.0&&(tS<0.0||tB<tS)){
+        vec3 hp=ro+rd*tB;
+        disc+=shadeFireSurface(hp,rd,ballCen,ti*1.7,1.4)*vec3(1.2,0.5,0.18);
+    }else if(tS>0.0){
+        vec3 hp=ro+rd*tS;
+        disc+=shadeFireSurface(hp,rd,sunCen,ti,1.05);
+    }
+    return disc+solarCorona(ro,rd,sunCen,ti);}
+void main(){
+    vec2 uv=(gl_FragCoord.xy-0.5*u_res)/min(u_res.x,u_res.y);float t=u_time;
+    float cs=t*0.02;
+    vec3 ro=vec3(sin(cs*0.7)*2.0,cos(cs*0.5)*1.5+cs*0.3,cs*2.0);
+    vec3 la=ro+vec3(sin(t*0.01)*0.5,cos(t*0.013)*0.3,3.0);
+    vec3 fw=normalize(la-ro),ri=normalize(cross(vec3(0,1,0),fw)),up=cross(fw,ri);
+    vec3 rd=normalize(fw+uv.x*ri+uv.y*up);
+    vec3 blaze=infernoBodies(ro,rd,t,fw,ri,up);
+    vec4 neb=nebula(ro,rd);
+    vec3 col=neb.rgb+blaze*(1.0-neb.a);
+    float s=stars(uv+vec2(t*0.001,t*0.0007),t);
+    float s2=stars(uv*1.5+vec2(100)+vec2(t*0.0005),t*0.7)*0.6;
+    float met=shootingStars(uv,t);
+    col+=(vec3(0.8,0.85,1)*s+vec3(1,0.9,0.7)*s2)*(1.0-neb.a);
+    col+=met*vec3(0.95,0.92,1.0)*(1.2+0.8*met);
+    col=col+col*smoothstep(0.3,1.0,dot(col,vec3(0.299,0.587,0.114)))*0.4;
+    vec2 vuv=gl_FragCoord.xy/u_res;
+    col*=1.0-0.4*dot((vuv-0.5)*1.2,(vuv-0.5)*1.2);
+    col=col/(1.0+col);col=pow(col,vec3(0.85));
+    fragColor=vec4(col,1);}`;
+
+const vs=`#version 300 es
+in vec2 a_pos;void main(){gl_Position=vec4(a_pos,0,1);}`;
+
+function compile(t,s){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(sh));return null}return sh}
+const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,vs));
+gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);gl.useProgram(p);
+const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+const l=gl.getAttribLocation(p,'a_pos');gl.enableVertexAttribArray(l);
+gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);
+const uR=gl.getUniformLocation(p,'u_res'),uT=gl.getUniformLocation(p,'u_time');
+const t0=performance.now();
+!function frame(){gl.uniform2f(uR,canvas.width,canvas.height);
+gl.uniform1f(uT,(performance.now()-t0)*0.001*SPEED);
+gl.drawArrays(gl.TRIANGLE_STRIP,0,4);requestAnimationFrame(frame)}();
+</script>
+</body>
+</html>

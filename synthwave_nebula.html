@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Synthwave Nebula</title>
+<style>
+*{margin:0;padding:0}
+body{background:#000;overflow:hidden;cursor:none}
+canvas{display:block;width:100vw;height:100vh}
+#back{position:fixed;top:20px;left:20px;z-index:10;color:#ff00ff;font:14px monospace;
+  text-decoration:none;opacity:0.4;cursor:pointer;transition:opacity 0.3s}
+#back:hover{opacity:1}
+</style>
+</head>
+<body>
+<a id="back" href="index.html">← BACK</a>
+<canvas id="c"></canvas>
+<script>
+const params = new URLSearchParams(location.search);
+const SPEED = parseFloat(params.get('speed')) || 1.0;
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+if(!gl){document.body.innerHTML='<div style="color:#fff;padding:40px">WebGL2 required</div>';throw 0}
+
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,1.5);
+  canvas.width=Math.floor(innerWidth*dpr);
+  canvas.height=Math.floor(innerHeight*dpr);
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+addEventListener('resize',resize);resize();
+
+const fs=`#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform vec2 u_res;
+uniform float u_time;
+#define T u_time
+#define Tslow (u_time*0.2)
+
+float tri(in float x){return abs(fract(x)-0.5);}
+vec3 tri3(in vec3 p){return vec3(tri(p.z+tri(p.y)),tri(p.z+tri(p.x)),tri(p.y+tri(p.x)));}
+float triNoise3d(vec3 p){
+    p.z+=T/40.0;float z=1.5,rz=0.0;vec3 bp=p;
+    float ca=cos(0.3),sa=sin(0.3);mat2 m2=mat2(ca,sa,-sa,ca);
+    for(float i=0.0;i<=3.0;i++){
+        vec3 dg=tri3(bp*2.0);p+=dg+T/30.0;bp*=2.0;z*=1.75;p*=1.1;p.yz*=m2;
+        rz+=tri(p.z+tri(p.x+tri(p.y)))/z;bp+=0.2;}
+    return rz;}
+float sun(vec2 uv){
+    float val=smoothstep(0.3,0.29,length(uv));
+    float bloom=smoothstep(0.7,0.0,length(uv));
+    float cut=3.0*sin((uv.y+Tslow*0.2*1.02)*100.0)+clamp(uv.y*14.0+1.0,-6.0,6.0);
+    return clamp(val*clamp(cut,0.0,1.0),0.0,1.0)+bloom*0.6;}
+float grid(vec2 uv){
+    vec2 size=vec2(uv.y,uv.y*uv.y*0.2)*0.01;
+    uv+=vec2(0.0,Tslow*4.0*1.05);uv=abs(fract(uv)-0.5);
+    vec2 lines=smoothstep(size,vec2(0.0),uv);
+    lines+=smoothstep(size*5.0,vec2(0.0),uv)*0.4;
+    return clamp(lines.x+lines.y,0.0,3.0);}
+void main(){
+    vec2 u=gl_FragCoord.xy;vec3 res=vec3(u_res,1.0);
+    vec2 uv=(2.0*u-res.xy)/res.y;vec4 o=vec4(0.0);
+    if(uv.y>=-0.2){
+        vec3 D=normalize(vec3((u+u-res.xy)/res.y,1.0));float d=0.0;
+        for(float i=0.0;i<100.0;i++){
+            vec3 p=D*d;p.y+=2.5;
+            float s=6.0-abs(p.y-cos(p.x/30.0)*4.0);
+            s-=8.4*triNoise3d(p/30.0);
+            d+=s=0.1+0.4*abs(s);
+            vec3 hp=vec3(1.0,0.2,0.8),or=vec3(1.0,0.4,0.1),pu=vec3(0.6,0.1,0.9);
+            float ph=Tslow*0.15+i*0.1;
+            vec3 cc=mix(hp,or,0.5+0.5*cos(ph));
+            cc=mix(cc,pu,0.5+0.5*sin(ph*0.7));
+            o+=vec4(6.0*cc/s,0.0);
+            o+=vec4(0.5*vec3(1.0,0.2,0.6)/abs(1.01+uv.y-cos(uv.x/3.3)),0.0);
+            float strobe=1.0+7.0*(0.5+0.5*sin(Tslow*2.0));
+            o+=vec4(4.0*strobe*vec3(0.8,0.15,0.4)/length(uv*2.0),0.0);}
+        o=tanh(o/5000.0*exp(100.0*vec4(5.0,2.0,1.5,0.0)/d/d));
+        vec2 sUV=uv+vec2(0.75,0.2);sUV.y-=0.6;float sv=sun(sUV);
+        vec3 sc=vec3(1.0,0.2,1.0);sc=mix(sc,vec3(1.0,0.4,0.1),sUV.y*2.0+0.2);
+        sc=mix(vec3(0.0),sc,sv);float cd=clamp(length(o.rgb)*2.0,0.0,1.0);
+        o.rgb=mix(sc,o.rgb,cd*0.7+0.3);o.rgb+=sc*0.3*(1.0-cd);
+        float hf=smoothstep(0.3,-0.2,uv.y);
+        vec3 hc=mix(vec3(0.6,0.0,0.4),vec3(1.0,0.3,0.1),hf);
+        o.rgb=mix(o.rgb,hc,hf*0.4);
+        float fog=smoothstep(0.1,-0.02,abs(uv.y+0.2));
+        o.rgb+=fog*fog*fog*vec3(1.0,0.4,0.8);}
+    if(uv.y<-0.2){
+        vec2 gUV=uv;gUV.y=3.0/(abs(gUV.y+0.2)+0.05);gUV.x*=gUV.y;
+        float gv=grid(gUV);vec3 gc=vec3(0.0,0.05,0.15);
+        gc=mix(gc,vec3(1.0,0.3,1.0),gv);
+        float di=1.0/(abs(uv.y+0.2)+0.05);gc*=smoothstep(100.0,10.0,di);
+        float hg=smoothstep(-0.5,-0.2,uv.y);gc+=vec3(0.5,0.1,0.3)*hg*hg;o.rgb=gc;}
+    vec3 col=o.rgb;float gray=dot(col,vec3(0.299,0.587,0.114));
+    col=mix(vec3(gray),col,1.4);vec2 vuv=gl_FragCoord.xy/u_res;
+    col*=1.0-0.5*dot((vuv-0.5)*1.3,(vuv-0.5)*1.3);
+    col*=0.95+0.05*sin(gl_FragCoord.y*2.5);
+    col=pow(max(col,0.0),vec3(0.9));fragColor=vec4(col,1.0);}`;
+
+const vs=`#version 300 es
+in vec2 a_pos;void main(){gl_Position=vec4(a_pos,0,1);}`;
+
+function compile(t,s){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(sh));return null}return sh}
+const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,vs));
+gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);gl.useProgram(p);
+const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+const l=gl.getAttribLocation(p,'a_pos');gl.enableVertexAttribArray(l);
+gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);
+const uR=gl.getUniformLocation(p,'u_res'),uT=gl.getUniformLocation(p,'u_time');
+const t0=performance.now();
+!function frame(){gl.uniform2f(uR,canvas.width,canvas.height);
+gl.uniform1f(uT,(performance.now()-t0)*0.001*SPEED);
+gl.drawArrays(gl.TRIANGLE_STRIP,0,4);requestAnimationFrame(frame)}();
+</script>
+</body>
+</html>
